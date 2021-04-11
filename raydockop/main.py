@@ -8,8 +8,10 @@ import os
 from scipy import sparse
 import numpy as np
 #from utils import get_memory_usage
-
+import pyarrow as pa
 import numpy as np
+import pyarrow.feather as feather
+import pandas as pd
 SEED = 12939 #from random.org
 np.random.seed(SEED)
 
@@ -83,13 +85,13 @@ if __name__=='__main__':
     # setup.load_fingerprints()
     # setup.load_scores()
     
-    dataset = '/data/dockop_data_new/ampcprocessed_data'
+    dataset = '/data/newdockop/dockop/code/mod_code_base/data_out/testprocessed_data'
 # +input_db_ext)
     
 
 
     fingerprint_file_ext = ".npz"
-    scores_file_ext = ".npy"
+    scores_file_ext = ".feather"
     fingerprint_file_names_list = glob.glob(os.path.join(dataset+"*"+fingerprint_file_ext))
 
     fingerprint_files_list = [(dataset+'{:01d}'.format(x)+ fingerprint_file_ext) for x in range(len(fingerprint_file_names_list))]
@@ -97,32 +99,92 @@ if __name__=='__main__':
 
     npz_list = []
     scores_list = []
-    for batch_num in range(10):
+    names_list = []
+    smiles_list = []
+    for batch_num in range(300):
         fingerprints = sparse.load_npz(fingerprint_files_list[batch_num])
-        scores = np.load(scores_files_list[batch_num], allow_pickle=True)
+        df = feather.read_feather(scores_files_list[batch_num])
+        scores = list(df['scores'])
+        smiles = list(df['smiles'])
+        names = list(df['names'])
         npz_list.append(fingerprints)
         scores_list.append(scores)
+        names_list.append(names)
+        smiles_list.append(smiles)
 
-    fingerprints = sparse.vstack(npz_list)
-    scores = np.concatenate(scores_list)
-    num_ligs = len(scores)
+    flat_sparse_fingerprints = sparse.vstack(npz_list)
 
-    feature_matrix = fold_to_size(fpSize, fingerprints)
+    flat_scores_list = [item for sublist in scores_list for item in sublist]
+    flat_names_list = [item for sublist in names_list for item in sublist]
+    flat_smiles_list = [item for sublist in smiles_list for item in sublist]
+    scores_arry = np.array(scores_list, dtype=np.float16)
+    np_scores = np.concatenate(scores_arry)
+    num_ligs = len(flat_scores_list)
+
+    feature_matrix = fold_to_size(fpSize, flat_sparse_fingerprints)
     
     #evaluation stuff goes here:    
     for estimator in estimators:
+
         for repeat in range(5):
             idx = np.arange(num_ligs)
+
             np.random.shuffle(idx)
+
+
             train_idx = idx[:trainingSetSize]
             test_idx = idx[trainingSetSize:]
 
+            # training_smi = [flat_smiles_list[i] for i in train_idx]
+            test_smi = [flat_smiles_list[i] for i in test_idx]
+
+
+            # training_names = [flat_names_list[i] for i in train_idx]
+            test_names = [flat_names_list[i] for i in test_idx]
+
+            # training_scores = [flat_scores_list[i] for i in train_idx]
+            test_scores = [flat_scores_list[i] for i in test_idx]
             
             common_estimator = CommonEstimator(estimator, cutoff=0.3, verbose=True)
             print(train_idx.shape)
-            print(scores.shape)
-            common_estimator.fit(feature_matrix[train_idx], scores[train_idx])
+            print(np_scores.shape)
+            common_estimator.fit(feature_matrix[train_idx], np_scores[train_idx])
             pred = common_estimator.chunked_predict(feature_matrix[test_idx])
+            pred_list = [pred[i] for i in range(len(pred))]
+            print(f'length of prediction list is {len(pred_list)}')
+            print(f'length of smiles is {len(test_smi)}')
+            print(f'length of names is {len(test_names)}')
+            print(f'length of scores is {len(test_scores)}')
 
-            setup.write_results(pred, fpSize, trainingSetSize, estimator['name'], repeat, test_idx)
-                
+            # scores = [scores_list[i] for i in range(len(scores_list))]
+
+            pred_list_pa = pa.array(pred_list)   
+            smiles_pa = pa.array(test_smi, type=pa.string())
+            scores_pa = pa.array(test_scores)
+            names_pa = pa.array(test_names, type=pa.string())
+
+            data = [
+            pred_list_pa,
+            smiles_pa,
+            scores_pa,
+            names_pa
+            ]
+
+            batch_from_data = pa.RecordBatch.from_arrays(data, ['pred_list', 'smiles', 'scores', 'names'])
+            df = batch_from_data.to_pandas()
+            feather.write_feather(df, f'test{repeat}.feather')
+
+            # setup.write_results(pred, fpSize, trainingSetSize, estimator['name'], repeat, test_idx)
+
+
+        # idx_pre_shuffled_pa = pa.array(idx_list_pre_shuffle, type=pa.int64())        
+        # idx_shuffled_pa = pa.array(idx_list_shuffled, type=pa.int64())
+
+        # data = [
+        # pred_list_pa,
+        # idx_pre_shuffled_pa,
+        # idx_shuffled_pa,
+        # smiles_pa,
+        # scores_pa,
+        # names_pa
+        # ]
