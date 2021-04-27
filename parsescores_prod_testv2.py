@@ -154,3 +154,25 @@ def fp_to_batch(job_count, record_batch):
     print(f'Job contained {len(smiles_list)} smiles strings')
     print(f'Job generated spares matrix with {len(row_idx)} row_idx')
     print(f'Job generated spares matrix with {len(col_idx)} col_idx')
+
+columns = ['standard_smiles', \
+           'canonical_id', \
+           'docking_score'
+           ]
+
+# # source = '/data/dockop_data/AmpC_screen_table_clean.feather'
+# reader = pa.ipc.open_file(filename)
+# enumerate_list = [(index, element.to_table()) for index, element in enumerate(fragments)]
+
+
+
+## Use the following for reading a larger partition of parquet files
+dataset_path = pathlib.Path('/data/dockop_glide_d3/fourth50k_glide_molchunkout/fourth50k_glide_out.molchunk')
+dataset = ds.dataset(dataset_path, format="feather")
+fragments = [file for file in dataset.get_fragments()]
+
+GB = 1024 ** 3
+ray.init(num_cpus=20, _memory=32*GB, object_store_memory=32*GB)
+
+futures = [fp_to_batch.remote(index, element.to_table()) for index, element in enumerate(fragments)]
+results = [ray.get(f) for f in futures]
