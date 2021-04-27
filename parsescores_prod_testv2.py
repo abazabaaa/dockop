@@ -167,7 +167,7 @@ columns = ['standard_smiles', \
 
 
 ## Use the following for reading a larger partition of parquet files
-dataset_path = pathlib.Path('/data/dockop_glide_d3/fourth50k_glide_molchunkout/fourth50k_glide_out.molchunk')
+dataset_path = pathlib.Path('/path/to/outfile.molchunk')
 dataset = ds.dataset(dataset_path, format="feather")
 fragments = [file for file in dataset.get_fragments()]
 
